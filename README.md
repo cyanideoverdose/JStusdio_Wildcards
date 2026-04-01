@@ -2,7 +2,7 @@
 
 A wildcard prompt node for ComfyUI with **Jinja2 templating**, **YAML wildcard support**, and **hot-reload** — no server restart needed when you update your wildcard files.
 
-Built by **Joaquin Studios** (Leizer on Civitai).
+Built by **Joaquin Studios** (CyanideOverdose on Civitai).
 
 ---
 
