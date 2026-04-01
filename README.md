@@ -25,7 +25,7 @@ Built by **Joaquin Studios** (CyanideOverdose on Civitai).
 ### Via ComfyUI Manager (recommended)
 1. Open ComfyUI Manager
 2. Click **Install via Git URL**
-3. Paste: `https://github.com/YOUR_USERNAME/jstudio-wildcards`
+3. Paste: `https://github.com/cyanideoverdose/jstudio-wildcards`
 4. Restart ComfyUI once
 
 ### Manual
