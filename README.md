@@ -2,7 +2,7 @@
 
 A wildcard prompt node for ComfyUI with **Jinja2 templating**, **YAML wildcard support**, and **hot-reload** — no server restart needed when you update your wildcard files.
 
-Built by **Joaquin Studios** (CyanideOverdose on Civitai).
+Built by **Joaquin Studios** (Leizer on Civitai).
 
 ---
 
@@ -11,21 +11,22 @@ Built by **Joaquin Studios** (CyanideOverdose on Civitai).
 - ✅ `__wildcard__` and `__folder/key__` syntax for `.txt` and `.yaml` files
 - ✅ `{option1|option2|option3}` random choice syntax
 - ✅ `{33%option_a|option_b}` weighted probability syntax
-- ✅ Full **Jinja2** template support with date-aware logic
+- ✅ Full **Jinja2** template support with date-aware conditional logic
 - ✅ **Hot-reload** button — update wildcard files without restarting ComfyUI
-- ✅ Nested YAML support with key navigation
+- ✅ Nested YAML support with slash key navigation
 - ✅ Holiday-aware wildcard pools (Halloween, Christmas, Valentine's)
 - ✅ Seeded randomness — connect to your KSampler seed for reproducible results
 - ✅ Automatic comma and whitespace cleanup
+- ✅ Auto-detects your ComfyUI wildcards folder — no configuration needed
 
 ---
 
 ## Installation
 
-### Via ComfyUI Manager (recommended)
+### Via ComfyUI Manager
 1. Open ComfyUI Manager
 2. Click **Install via Git URL**
-3. Paste: `https://github.com/cyanideoverdose/jstudio-wildcards`
+3. Paste: `https://github.com/cyanideoverdose/JStudio_Wildcards`
 4. Restart ComfyUI once
 
 ### Manual
@@ -38,26 +39,20 @@ Built by **Joaquin Studios** (CyanideOverdose on Civitai).
 
 ---
 
-## Nodes
+## Node
 
 ### 🎲 JStudio Wildcards
-The main prompt resolver. Connects to your CLIP Text Encode node.
 
 **Inputs:**
+
 | Input | Type | Description |
 |-------|------|-------------|
 | `prompt` | STRING | Your prompt with wildcard tags and/or Jinja2 templates |
-| `seed` | INT | Random seed — connect to KSampler seed for sync |
-| `wildcards_folder` | STRING | Path to wildcards folder (leave blank to auto-detect) |
+| `seed` | INT | Random seed — connect to KSampler seed for reproducible results |
 
-**Output:** `resolved_prompt` (STRING) — the fully resolved prompt string
+**Output:** `resolved_prompt` (STRING) — the fully resolved prompt, ready to connect to CLIP Text Encode
 
-**Button:** 🔄 Refresh Wildcards — reloads all files from disk instantly, no restart needed
-
----
-
-### 🔄 JStudio Reload Wildcards
-Standalone reload utility node. Useful if you want reload control separate from the main node.
+**Button:** 🔄 Refresh Wildcards — reloads all wildcard files from disk instantly, no restart needed
 
 ---
 
@@ -66,14 +61,15 @@ Standalone reload utility node. Useful if you want reload control separate from 
 ### Wildcard files (txt)
 ```
 __scene__
-__pose-club/club_area__
+__pose/action__
+__lighting__
 ```
 
 ### YAML wildcards (nested keys)
 ```
-__characters/kalasir__
+__characters/hatsune_miku__
 __characters/random__
-__outfits/lucky_lady__
+__outfits/school_uniform__
 ```
 
 ### Random choice
@@ -91,9 +87,9 @@ __outfits/lucky_lady__
 ### Jinja2 templates
 ```jinja2
 {% if is_halloween %}
-  {{ wildcard("characters/random") }}, {{ wildcard("outfits/halloween") }}
+  {{ wildcard("characters/random") }}, witch hat, dark magic
 {% elif is_christmas %}
-  {{ wildcard("characters/random") }}, {{ wildcard("outfits/christmas") }}
+  {{ wildcard("characters/random") }}, santa outfit, snow
 {% else %}
   {{ wildcard("characters/random") }}, {{ wildcard("outfits/casual") }}
 {% endif %}
@@ -103,8 +99,8 @@ __outfits/lucky_lady__
 
 | Variable | Description |
 |----------|-------------|
-| `wildcard("key")` | Pick one random entry from a wildcard file |
-| `wc_all("key")` | Get full list from a wildcard file |
+| `wildcard("key")` | Pick one random entry from a wildcard file or YAML key |
+| `wc_all("key")` | Get the full list from a wildcard file |
 | `month` | Current month (integer) |
 | `day` | Current day (integer) |
 | `year` | Current year (integer) |
@@ -112,18 +108,8 @@ __outfits/lucky_lady__
 | `is_halloween` | True during October |
 | `is_christmas` | True during December and late November |
 | `is_valentines` | True February 1–14 |
-| `is_holiday` | True if any holiday is active |
+| `is_holiday` | True if any holiday flag is active |
 | `random` | Seeded Python random instance |
-
-### Conditional body tags example
-```jinja2
-{% set cam = wildcard("camera_angle") %}
-{{ cam }},
-{% if "behind" in cam or "back" in cam %}
-  large ass, bubble butt,
-{% endif %}
-{{ wildcard("characters/random") }}
-```
 
 ---
 
@@ -131,43 +117,56 @@ __outfits/lucky_lady__
 
 ### TXT — one entry per line
 ```
-foggy twilight city street
+foggy city street at night
 neon-lit alley
 rooftop under the moon
-# This is a comment and will be ignored
+# Lines starting with # are ignored
 ```
 
-### YAML — flat list
+### YAML — flat list under a key
 ```yaml
 scenes:
-  - foggy twilight city street
+  - foggy city street at night
   - neon-lit alley
   - rooftop under the moon
 ```
 
-### YAML — nested keys
+### YAML — nested character sheets
 ```yaml
-characters:
-  kalasir:
-    - "pale porcelain skin, long wavy black hair, blue eyes..."
-  amelie:
-    - "cobalt blue skin, long red hair, gold eyes..."
-  random:
-    - "__characters/kalasir__"
-    - "__characters/amelie__"
+hatsune_miku:
+  - "1girl, long twintails, teal hair, teal eyes, slim, white dress shirt, black skirt"
+
+zero_two:
+  - "1girl, long pink hair, red horns, green eyes, white and red uniform, tall"
+
+rem:
+  - "1girl, short blue hair, blue eyes, maid uniform, petite"
+
+random:
+  - "__characters/hatsune_miku__"
+  - "__characters/zero_two__"
+  - "__characters/rem__"
 ```
 
 ---
 
-## Wildcard Folder Auto-Detection
+## Conditional Tag Example
 
-The node walks up from its install location looking for a `wildcards` folder automatically.
+Gate body or outfit tags based on resolved camera angle or outfit type:
 
-If your wildcards are in a custom location, set the `wildcards_folder` input explicitly:
+```jinja2
+{% set char = wildcard("characters/zero_two") %}
+{% set cam = wildcard("camera_angle") %}
+{% set is_rear = "behind" in cam or "back" in cam %}
+{{ char }}{% if is_rear %}, large ass, bubble butt{% endif %},
+{{ wildcard("outfits/casual") }}, {{ cam }}, __lighting__, __scene__
 ```
-C:/ComfyUI/wildcards
-/home/user/ComfyUI/wildcards
-```
+
+---
+
+## Folder Auto-Detection
+
+The node automatically finds your wildcards folder by walking up from its install location until it finds a directory containing both `custom_nodes` and `wildcards` as siblings — that's your ComfyUI root. No manual path configuration needed.
 
 ---
 
@@ -177,4 +176,4 @@ MIT License — free to use, modify, and distribute.
 
 ---
 
-*Joaquin Studios — built for the Twilight Dust production pipeline*
+*Joaquin Studios*
