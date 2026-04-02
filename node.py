@@ -124,7 +124,6 @@ def _resolve_wildcard_tags(text: str, rng: random.Random, depth=0) -> str:
         key = m.group(1)
         entries = _load_wildcard(key)
         chosen = rng.choice(entries).strip()
-        # If the chosen entry contains Jinja2, render it before recursing
         if "{%" in chosen or "{{" in chosen:
             chosen = _resolve_jinja2(chosen, rng)
         return _resolve_wildcard_tags(chosen, rng, depth + 1)
@@ -170,40 +169,75 @@ def _resolve_weighted_choice(text: str, rng: random.Random) -> str:
     return text
 
 
-def _resolve_jinja2(text: str, rng: random.Random) -> str:
+def _build_jinja_env(rng: random.Random) -> Environment:
+    """Shared Jinja2 environment — positive and negative share variable scope."""
+    env = Environment(loader=BaseLoader(), undefined=StrictUndefined)
+    now = datetime.now()
+    m, d = now.month, now.day
+
+    def wildcard(key):
+        return rng.choice(_load_wildcard(key))
+
+    env.globals.update({
+        "wildcard": wildcard,
+        "wc_all": _load_wildcard,
+        "month": m, "day": d, "year": now.year, "now": now,
+        "random": rng,
+        "is_halloween":  (m == 10),
+        "is_christmas":  (m == 12 or (m == 11 and d >= 25)),
+        "is_valentines": (m == 2 and d <= 14),
+        "is_holiday":    (m == 10) or (m == 12) or (m == 11 and d >= 25) or (m == 2 and d <= 14),
+    })
+    return env
+
+
+def _resolve_jinja2(text: str, rng: random.Random, env=None) -> str:
     if "{%" not in text and "{{" not in text:
         return text
     try:
-        env = Environment(loader=BaseLoader(), undefined=StrictUndefined)
-        now = datetime.now()
-        m, d = now.month, now.day
-
-        def wildcard(key):
-            return rng.choice(_load_wildcard(key))
-
-        env.globals.update({
-            "wildcard": wildcard,
-            "wc_all": _load_wildcard,
-            "month": m, "day": d, "year": now.year, "now": now,
-            "random": rng,
-            "is_halloween":   (m == 10),
-            "is_christmas":   (m == 12 or (m == 11 and d >= 25)),
-            "is_valentines":  (m == 2 and d <= 14),
-            "is_holiday":     (m == 10) or (m == 12) or (m == 11 and d >= 25) or (m == 2 and d <= 14),
-        })
+        if env is None:
+            env = _build_jinja_env(rng)
         return env.from_string(text).render()
     except Exception as e:
         return f"[Jinja2 error: {e}] {text}"
 
 
-def resolve_prompt(text: str, seed: int) -> str:
-    rng = random.Random(seed)
-    text = _resolve_jinja2(text, rng)
-    text = _resolve_wildcard_tags(text, rng)
-    text = _resolve_weighted_choice(text, rng)
+def _clean(text: str) -> str:
     text = re.sub(r',\s*,', ',', text)
-    text = re.sub(r'\s+', ' ', text).strip().strip(',').strip()
-    return text
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text.strip(',').strip()
+
+
+def resolve_prompt(positive: str, negative: str, seed: int) -> tuple:
+    """
+    Returns (resolved_positive, resolved_negative).
+    Both use the same seed and share the same Jinja2 environment
+    so variables set in positive are available in negative.
+    """
+    rng = random.Random(seed)
+    env = _build_jinja_env(rng)
+
+    def _render(t):
+        if "{%" not in t and "{{" not in t:
+            return t
+        try:
+            return env.from_string(t).render()
+        except Exception as e:
+            return f"[Jinja2 error: {e}] {t}"
+
+    def _resolve(t):
+        t = _render(t)
+        t = _resolve_wildcard_tags(t, rng)
+        t = _resolve_weighted_choice(t, rng)
+        return _clean(t)
+
+    # Positive resolves first — sets Jinja2 variables
+    resolved_pos = _resolve(positive)
+
+    # Negative resolves second — can reference variables set during positive
+    resolved_neg = _resolve(negative) if negative.strip() else ""
+
+    return resolved_pos, resolved_neg
 
 
 # Pre-warm at import
@@ -225,6 +259,11 @@ class JStudioWildcards:
                     "default": "__lucky_ladies/random__",
                     "dynamicPrompts": False,
                 }),
+                "negative_prompt": ("STRING", {
+                    "multiline": True,
+                    "default": "__negatives/global__",
+                    "dynamicPrompts": False,
+                }),
                 "seed": ("INT", {
                     "default": 0,
                     "min": 0,
@@ -233,8 +272,8 @@ class JStudioWildcards:
             },
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("resolved_prompt",)
+    RETURN_TYPES = ("STRING", "STRING",)
+    RETURN_NAMES = ("resolved_prompt", "resolved_negative",)
     FUNCTION = "process"
     CATEGORY = "Joaquin Studios"
     OUTPUT_NODE = False
@@ -243,10 +282,10 @@ class JStudioWildcards:
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
-    def process(self, prompt: str, seed: int):
-        resolved = resolve_prompt(prompt, seed)
-        print(f"[JStudio Wildcards] Resolved prompt (seed {seed})")
-        return (resolved,)
+    def process(self, prompt: str, negative_prompt: str, seed: int):
+        resolved_pos, resolved_neg = resolve_prompt(prompt, negative_prompt, seed)
+        print(f"[JStudio Wildcards] Seed: {seed}")
+        return (resolved_pos, resolved_neg,)
 
 
 NODE_CLASS_MAPPINGS = {

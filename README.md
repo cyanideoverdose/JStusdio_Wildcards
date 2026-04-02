@@ -1,6 +1,6 @@
 # JStudio Wildcards — ComfyUI Custom Node
 
-A wildcard prompt node for ComfyUI with **Jinja2 templating**, **YAML wildcard support**, and **hot-reload** — no server restart needed when you update your wildcard files.
+A wildcard prompt node for ComfyUI with **Jinja2 templating**, **YAML wildcard support**, **negative prompt resolution**, and **hot-reload** — no server restart needed when you update your wildcard files.
 
 Built by **Joaquin Studios** (Leizer on Civitai).
 
@@ -11,19 +11,22 @@ Built by **Joaquin Studios** (Leizer on Civitai).
 - ✅ `__wildcard__` and `__folder/key__` syntax for `.txt` and `.yaml` files
 - ✅ `{option1|option2|option3}` random choice syntax
 - ✅ `{33%option_a|option_b}` weighted probability syntax
-- ✅ Full **Jinja2** template support with date-aware conditional logic
+- ✅ Full **Jinja2** template support with date-aware logic
+- ✅ **Negative prompt** input with full wildcard and Jinja2 support
+- ✅ **Shared Jinja2 scope** — variables set in positive prompt are available in negative
+- ✅ **Inline separator** — write positive and negative in one template with `###NEGATIVE###`
 - ✅ **Hot-reload** button — update wildcard files without restarting ComfyUI
-- ✅ Nested YAML support with slash key navigation
+- ✅ Nested YAML support with key navigation
 - ✅ Holiday-aware wildcard pools (Halloween, Christmas, Valentine's)
 - ✅ Seeded randomness — connect to your KSampler seed for reproducible results
 - ✅ Automatic comma and whitespace cleanup
-- ✅ Auto-detects your ComfyUI wildcards folder — no configuration needed
+- ✅ `character_name` output for automatic filename tagging
 
 ---
 
 ## Installation
 
-### Via ComfyUI Manager
+### Via ComfyUI Manager (recommended)
 1. Open ComfyUI Manager
 2. Click **Install via Git URL**
 3. Paste: `https://github.com/cyanideoverdose/JStudio_Wildcards`
@@ -39,20 +42,33 @@ Built by **Joaquin Studios** (Leizer on Civitai).
 
 ---
 
-## Node
+## Nodes
 
 ### 🎲 JStudio Wildcards
+The main prompt resolver.
 
 **Inputs:**
-
 | Input | Type | Description |
 |-------|------|-------------|
-| `prompt` | STRING | Your prompt with wildcard tags and/or Jinja2 templates |
-| `seed` | INT | Random seed — connect to KSampler seed for reproducible results |
+| `prompt` | STRING | Positive prompt with wildcard tags and/or Jinja2 templates |
+| `seed` | INT | Random seed — connect to KSampler seed for sync |
+| `wildcards_folder` | STRING | Path to wildcards folder (leave blank to auto-detect) |
+| `character_wildcard` | STRING | Wildcard file to watch for character name extraction |
+| `negative_prompt` | STRING (optional) | Negative prompt — supports wildcards and Jinja2, shares variable scope with positive |
 
-**Output:** `resolved_prompt` (STRING) — the fully resolved prompt, ready to connect to CLIP Text Encode
+**Outputs:**
+| Output | Type | Description |
+|--------|------|-------------|
+| `resolved_prompt` | STRING | Fully resolved positive prompt |
+| `resolved_negative` | STRING | Fully resolved negative prompt |
+| `character_name` | STRING | Detected character name for use in filenames |
 
-**Button:** 🔄 Refresh Wildcards — reloads all wildcard files from disk instantly, no restart needed
+**Button:** 🔄 Refresh Wildcards — reloads all files from disk instantly, no restart needed
+
+---
+
+### 🔄 JStudio Reload Wildcards
+Standalone reload utility node. Useful if you want reload control as a separate node in your workflow.
 
 ---
 
@@ -61,15 +77,14 @@ Built by **Joaquin Studios** (Leizer on Civitai).
 ### Wildcard files (txt)
 ```
 __scene__
-__pose/action__
-__lighting__
+__pose/camera_angle__
+__outfits/standard__
 ```
 
 ### YAML wildcards (nested keys)
 ```
-__characters/hatsune_miku__
-__characters/random__
-__outfits/school_uniform__
+__characters/my_cast/char_a__
+__prompts/my_prompts/standard__
 ```
 
 ### Random choice
@@ -84,23 +99,77 @@ __outfits/school_uniform__
 {33%outerwear|}                 → 33% outerwear, 67% empty string
 ```
 
-### Jinja2 templates
+---
+
+## Jinja2 Templates
+
+### Basic usage
+```jinja2
+{% set char_name = 'char_a' %}
+{% set desc = wildcard("characters/my_cast/" ~ char_name) %}
+{% set cam = wildcard("pose/camera_angle") %}
+{% set is_rear = "behind" in cam or "back" in cam %}
+{% if is_rear %}
+  {{ wildcard("characters/my_cast/" ~ char_name ~ "_rear") }}, from_behind, back_view
+{% else %}
+  {{ desc }}
+{% endif %}, __outfits/standard__, {{ cam }}, __skin__
+```
+
+### Inline negative with `###NEGATIVE###` separator
+Write positive and negative in one template. Variables are shared across both sides:
+
+```jinja2
+{% set outfit_key = ["outfits/revealing", "outfits/standard", "outfits/bodysuit"] | random %}
+{% set outfit = wildcard(outfit_key) %}
+{% set is_revealing = outfit_key in ["outfits/revealing"] %}
+{% set cam = wildcard("pose/camera_angle") %}
+{% set is_rear = "behind" in cam %}
+
+{{ wildcard("characters/my_cast/char_a") }}, {{ outfit }}, __pose/action__, __scene__, {{ cam }}, __skin__
+
+###NEGATIVE###
+
+{% if not is_revealing %}visible_nipples, exposed_breasts,{% endif %}
+{% if is_rear %}looking_at_viewer, facing_camera,{% endif %}
+__negatives/global__
+```
+
+### Separate negative prompt input
+The `negative_prompt` input shares the same Jinja2 variable scope as the positive prompt. Variables set in the positive are available in the negative:
+
+**Positive prompt:**
+```jinja2
+{% set char_name = 'char_a' %}
+{% set is_clothed = true %}
+{{ wildcard("characters/my_cast/" ~ char_name) }}, __outfits/standard__
+```
+
+**Negative prompt input:**
+```jinja2
+{% if is_clothed %}visible_nipples, exposed_breasts,{% endif %}
+__negatives/global__
+```
+
+### Holiday-aware pools
 ```jinja2
 {% if is_halloween %}
-  {{ wildcard("characters/random") }}, witch hat, dark magic
+  {{ wildcard("characters/my_cast/char_a") }}, __outfits/halloween__, __scene/spooky__
 {% elif is_christmas %}
-  {{ wildcard("characters/random") }}, santa outfit, snow
+  {{ wildcard("characters/my_cast/char_a") }}, __outfits/christmas__, __scene/winter__
 {% else %}
-  {{ wildcard("characters/random") }}, {{ wildcard("outfits/casual") }}
+  {{ wildcard("characters/my_cast/char_a") }}, __outfits/standard__, __scene/location__
 {% endif %}
 ```
 
-**Available Jinja2 globals:**
+---
+
+## Available Jinja2 Globals
 
 | Variable | Description |
 |----------|-------------|
-| `wildcard("key")` | Pick one random entry from a wildcard file or YAML key |
-| `wc_all("key")` | Get the full list from a wildcard file |
+| `wildcard("key")` | Pick one random entry from a wildcard file |
+| `wc_all("key")` | Get full list from a wildcard file |
 | `month` | Current month (integer) |
 | `day` | Current day (integer) |
 | `year` | Current year (integer) |
@@ -108,65 +177,84 @@ __outfits/school_uniform__
 | `is_halloween` | True during October |
 | `is_christmas` | True during December and late November |
 | `is_valentines` | True February 1–14 |
-| `is_holiday` | True if any holiday flag is active |
+| `is_holiday` | True if any holiday is active |
 | `random` | Seeded Python random instance |
 
 ---
 
-## Wildcard File Formats
+## Recommended Folder Structure
 
-### TXT — one entry per line
 ```
-foggy city street at night
-neon-lit alley
-rooftop under the moon
-# Lines starting with # are ignored
+wildcards/
+  characters/
+    my_cast.yaml          ← character descriptions (front + rear)
+  prompts/
+    my_prompts.yaml       ← reusable prompt templates
+  negatives/
+    global.txt            ← negatives applied to everything
+    character/
+      char_a.txt          ← character-specific negatives
+  my_cast.yaml            ← character resolution and random list
+  outfits/
+  pose/
+  scene/
+  lighting/
+  skin.txt
 ```
 
-### YAML — flat list under a key
+### characters/my_cast.yaml structure
 ```yaml
-scenes:
-  - foggy city street at night
-  - neon-lit alley
-  - rooftop under the moon
+char_a: "1woman, blue skin, colored_skin, long red hair, ..."
+char_a_rear: "1woman, blue skin, colored_skin, long red hair, ..."  # face/eye tags removed
+char_b: "..."
+char_b_rear: "..."
 ```
 
-### YAML — nested character sheets
+### prompts/my_prompts.yaml structure
 ```yaml
-hatsune_miku:
-  - "1girl, long twintails, teal hair, teal eyes, slim, white dress shirt, black skirt"
+standard: |
+  {% set desc = wildcard("characters/my_cast/" ~ char_name) %}
+  {% set cam = wildcard("pose/camera_angle") %}
+  {% set is_rear = "behind" in cam or "back" in cam %}
+  {% if is_rear %}{{ wildcard("characters/my_cast/" ~ char_name ~ "_rear") }}, from_behind{% else %}{{ desc }}{% endif %}, __outfits/standard__, {{ cam }}, __skin__
 
-zero_two:
-  - "1girl, long pink hair, red horns, green eyes, white and red uniform, tall"
+club: |
+  {% set desc = wildcard("characters/my_cast/" ~ char_name) %}
+  {{ desc }}, __outfits/standard__, __scene/club__, __lighting/mood__, __pose/action__, __skin__
+```
 
-rem:
-  - "1girl, short blue hair, blue eyes, maid uniform, petite"
-
+### my_cast.yaml structure
+```yaml
 random:
-  - "__characters/hatsune_miku__"
-  - "__characters/zero_two__"
-  - "__characters/rem__"
+  - "__my_cast/char_a__"
+  - "__my_cast/char_b__"
+
+char_a:
+  - "{% set char_name = 'char_a' %}{{ wildcard('prompts/my_prompts/standard') }}"
+  - "{% set char_name = 'char_a' %}{{ wildcard('prompts/my_prompts/club') }}"
+
+char_b:
+  - "{% set char_name = 'char_b' %}{{ wildcard('prompts/my_prompts/standard') }}"
+  - "{% set char_name = 'char_b' %}{{ wildcard('prompts/my_prompts/club') }}"
 ```
+
+Adding a new prompt variant: edit one entry in `prompts/my_prompts.yaml`, add one line per character in `my_cast.yaml`. Adding a new character: add descriptions to `characters/my_cast.yaml`, add entries to `my_cast.yaml`.
 
 ---
 
-## Conditional Tag Example
+## Example Wildcard Pack
 
-Gate body or outfit tags based on resolved camera angle or outfit type:
-
-```jinja2
-{% set char = wildcard("characters/zero_two") %}
-{% set cam = wildcard("camera_angle") %}
-{% set is_rear = "behind" in cam or "back" in cam %}
-{{ char }}{% if is_rear %}, large ass, bubble butt{% endif %},
-{{ wildcard("outfits/casual") }}, {{ cam }}, __lighting__, __scene__
-```
+A complete example wildcard pack with placeholder characters and folder structure is available in the `examples/` folder. Drop it into your wildcards directory to get a working pipeline immediately.
 
 ---
 
-## Folder Auto-Detection
+## Wildcard Folder Auto-Detection
 
-The node automatically finds your wildcards folder by walking up from its install location until it finds a directory containing both `custom_nodes` and `wildcards` as siblings — that's your ComfyUI root. No manual path configuration needed.
+The node walks up from its install location looking for a `wildcards` folder automatically. To use a custom location, set the `wildcards_folder` input:
+```
+C:/ComfyUI/wildcards
+/home/user/ComfyUI/wildcards
+```
 
 ---
 
